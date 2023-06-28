@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>jp.openstandia.connector</groupId>
+        <artifactId>connector-gateway</artifactId>
+        <version>0.0.2-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <name>Connector Gateway Zip</name>
+    <groupId>jp.openstandia.connector</groupId>
+    <artifactId>connector-gateway-zip</artifactId>
+    <version>0.0.2-SNAPSHOT</version>
+
+    <dependencies>
+        <dependency>
+            <groupId>jp.openstandia.connector</groupId>
+            <artifactId>connector-gateway-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>jp.openstandia.connector</groupId>
+            <artifactId>connector-gateway-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.tirasa.connid</groupId>
+            <artifactId>connector-server-zip</artifactId>
+            <type>zip</type>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>assemble-server</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <configuration>
+                            <appendAssemblyId>true</appendAssemblyId>
+                            <descriptor>src/assembly/zip-server.xml</descriptor>
+                            <archiverConfig>
+                                <directoryMode>0755</directoryMode>
+                                <defaultDirectoryMode>0755</defaultDirectoryMode>
+                                <fileMode>0644</fileMode>
+                            </archiverConfig>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>assemble-client</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <configuration>
+                            <appendAssemblyId>true</appendAssemblyId>
+                            <descriptor>src/assembly/zip-client.xml</descriptor>
+                            <archiverConfig>
+                                <directoryMode>0755</directoryMode>
+                                <defaultDirectoryMode>0755</defaultDirectoryMode>
+                                <fileMode>0644</fileMode>
+                            </archiverConfig>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <configuration>
+                    <includeArtifactIds>connector-server-zip</includeArtifactIds>
+                    <outputDirectory>${project.build.directory}/extract</outputDirectory>
+                    <includes>connid-connector-server/**</includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>unpack-zip</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>unpack-dependencies</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

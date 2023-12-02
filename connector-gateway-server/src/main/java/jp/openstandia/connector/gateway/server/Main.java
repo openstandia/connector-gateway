@@ -53,6 +53,7 @@ public class Main {
     private int wsServerPort;
     private String wsBindAddress = null;
     private int wsMaxConnections = 10;
+    private int wsMaxBinarySize = 8 * 1024;
     private Server server;
     private ServerConnector connector;
 
@@ -100,6 +101,10 @@ public class Main {
         return wsMaxConnections;
     }
 
+    public int getWsMaxBinarySize() {
+        return wsMaxBinarySize;
+    }
+
     public Long getStartTime() {
         return startDate;
     }
@@ -127,7 +132,7 @@ public class Main {
         final String apiKey = resolveAPIKey();
 
         JettyWebSocketServletContainerInitializer.configure(context, (servletContext, container) -> {
-            container.setMaxBinaryMessageSize(65535);
+            container.setMaxBinaryMessageSize(getWsMaxBinarySize());
             container.addMapping(contextPath, (req, resp) -> {
                 // authentication by API key if configured
                 // TODO support more authentication method

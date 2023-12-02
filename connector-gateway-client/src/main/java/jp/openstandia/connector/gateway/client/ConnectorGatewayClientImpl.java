@@ -36,6 +36,7 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
     private final String gatewayURL;
     private final String gatewayProxy;
+    private final int maxBinarySize;
 
     private CountDownLatch stopLatch;
     private Long startDate = null;
@@ -43,9 +44,14 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
     private SubmissionPublisher<Boolean> reconnectPublisher;
 
-    public ConnectorGatewayClientImpl(String gatewayURL, String gatewayProxy) {
+    public ConnectorGatewayClientImpl(String gatewayURL, String gatewayProxy, int maxBinarySize) {
         this.gatewayURL = gatewayURL;
         this.gatewayProxy = gatewayProxy;
+        this.maxBinarySize = maxBinarySize;
+    }
+
+    public int getMaxBinarySize() {
+        return maxBinarySize;
     }
 
     @Override
@@ -137,8 +143,7 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
         setupProxy(httpClient);
 
         WebSocketClient webSocketClient = new WebSocketClient(httpClient);
-        webSocketClient.setMaxBinaryMessageSize(16 * 1024);
-        webSocketClient.setMaxBinaryMessageSize(9 * 1024);
+        webSocketClient.setMaxBinaryMessageSize(getMaxBinarySize());
 
         try {
             webSocketClient.start();

@@ -112,7 +112,7 @@ public class TcpConnectionListener extends Thread {
                 while (true) {
                     try {
                         threadPool.execute(() -> {
-                            if (!WebSocketServerListener.connect(connection)) {
+                            if (!WebSocketServerListener.connect(connection, connectorServer.getWsMaxBinarySize())) {
                                 try {
                                     connection.close();
                                 } catch (IOException e) {

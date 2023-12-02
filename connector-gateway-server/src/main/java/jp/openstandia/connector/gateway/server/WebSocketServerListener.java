@@ -63,7 +63,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
         byte[] payload;
     }
 
-    public static boolean connect(Socket tcpSocket) {
+    public static boolean connect(Socket tcpSocket, int maxBinarySize) {
         List<CompletableFuture<Channel>> futures = sessions.entrySet().stream()
                 .filter(entry -> entry.getKey().isOpen())
                 .map(entry -> {
@@ -169,7 +169,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             InputStream in = tcpSocket.getInputStream();
             RemoteEndpoint wsRemote = session.getRemote();
 
-            byte[] bytes = new byte[8192];
+            byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
             int count = 0;
             while (true) {
                 count = in.read(bytes);

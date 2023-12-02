@@ -168,7 +168,7 @@ public final class Main {
             Thread.currentThread().setContextClassLoader(Main.class.getClassLoader());
         }
 
-        connectorServer = new ConnectorGatewayClientImpl(gatewayURL, gatewayProxy);
+        connectorServer = new ConnectorGatewayClientImpl(gatewayURL, gatewayProxy, 8 * 1024);
         connectorServer.setPort(port);
         connectorServer.setBundleURLs(buildBundleURLs(new File(bundleDirStr)));
         if (libDirStr != null) {

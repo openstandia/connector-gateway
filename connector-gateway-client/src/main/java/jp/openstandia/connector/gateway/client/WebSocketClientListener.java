@@ -45,6 +45,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     private final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
     private final ConnectorGatewayClientImpl server;
+    private final String endpoint;
 
     private Session session;
     private ScheduledFuture<?> keepAlive;
@@ -52,8 +53,9 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     Map<Integer, PipedOutputStream> channels = new HashMap<>();
 
-    public WebSocketClientListener(ConnectorGatewayClientImpl server) {
+    public WebSocketClientListener(ConnectorGatewayClientImpl server, String endpoint) {
         this.server = server;
+        this.endpoint = endpoint;
 
         threadPool =
                 new ThreadPoolExecutor(server.getMinWorkers(), server.getMaxWorkers(), 30,
@@ -94,7 +96,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketError(Throwable cause) {
-        server.reconnect();
+        server.reconnect(endpoint);
     }
 
     @Override
@@ -200,7 +202,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
             pout.flush();
 
         } catch (IOException e) {
-            e.printStackTrace();
+            LOG.error(e, "Failed to handle body message from server");
         }
     }
 

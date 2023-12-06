@@ -54,6 +54,8 @@ public final class Main {
 
     private static final String PROP_GATEWAY_URL = "connectorgateway.url";
 
+    private static final String PROP_GATEWAY_API_KEY = "connectorgateway.apiKey";
+
     private static final String PROP_GATEWAY_PROXY = "connectorgateway.proxy";
 
     private static ConnectorServer connectorServer;
@@ -133,7 +135,8 @@ public final class Main {
         String ifAddress = properties.getProperty(PROP_IFADDRESS);
         String keyHash = properties.getProperty(PROP_KEY);
         String loggerClass = properties.getProperty(PROP_LOGGER_CLASS);
-        String gatewayURL = properties.getProperty(PROP_GATEWAY_URL);
+        String gatewayUrl = properties.getProperty(PROP_GATEWAY_URL);
+        String gatewayApiKey = properties.getProperty(PROP_GATEWAY_API_KEY);
         String gatewayProxy = properties.getProperty(PROP_GATEWAY_PROXY);
 
         if (portStr == null) {
@@ -168,7 +171,7 @@ public final class Main {
             Thread.currentThread().setContextClassLoader(Main.class.getClassLoader());
         }
 
-        connectorServer = new ConnectorGatewayClientImpl(gatewayURL, gatewayProxy, 8 * 1024);
+        connectorServer = new ConnectorGatewayClientImpl(gatewayUrl, gatewayApiKey, gatewayProxy, 8 * 1024);
         connectorServer.setPort(port);
         connectorServer.setBundleURLs(buildBundleURLs(new File(bundleDirStr)));
         if (libDirStr != null) {

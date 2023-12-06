@@ -54,7 +54,8 @@ Note: To enable authentication, set the environment variable `API_KEY_FILE` to t
 
 1. Download the ZIP file and extract it.
 2. Edit the `conf/connectorserver.properties` file to configure the connection settings. While this file is the configuration file for the Java Connector Server, for Connector Gateway Client-specific settings, add the following properties:
-    - `connectorgateway.url`: Set the endpoint URL of the Connector Gateway Server to establish the connection. If authentication is enabled, specify the API key using the `token` query parameter.
+    - `connectorgateway.url`: Set the endpoint URL of the Connector Gateway Server to establish the connection.
+    - `connectorgateway.apiKey`: If authentication is enabled, specify the API key.
     - `connectorgateway.proxy`: Set the URL if you need to use a proxy server.
 3. Similar to the regular Java Connector Server, place the JAR files of the connectors you intend to use in the `bundles` directory.
 4. Execute `./bin/ConnectorGatewayClient.sh -run -properties conf/connectorserver.properties` to start the Connector Gateway Client.

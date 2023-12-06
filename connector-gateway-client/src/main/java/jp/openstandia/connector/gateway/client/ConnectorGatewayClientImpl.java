@@ -15,8 +15,11 @@
  */
 package jp.openstandia.connector.gateway.client;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import org.eclipse.jetty.client.*;
 import org.eclipse.jetty.client.api.AuthenticationStore;
+import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.util.BasicAuthentication;
 import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.exceptions.UpgradeException;
@@ -30,11 +33,14 @@ import org.identityconnectors.framework.server.ConnectorServer;
 
 import java.net.URI;
 import java.util.Calendar;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 public class ConnectorGatewayClientImpl extends ConnectorServer {
 
-    private final String gatewayURL;
+    private final String gatewayConfigurationEndpoint;
+    private final String gatewayApiKey;
     private final String gatewayProxy;
     private final int maxBinarySize;
 
@@ -42,10 +48,11 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
     private Long startDate = null;
     private static final Log LOG = Log.getLog(ConnectorGatewayClientImpl.class);
 
-    private SubmissionPublisher<Boolean> reconnectPublisher;
+    private SubmissionPublisher<String> reconnectPublisher;
 
-    public ConnectorGatewayClientImpl(String gatewayURL, String gatewayProxy, int maxBinarySize) {
-        this.gatewayURL = gatewayURL;
+    public ConnectorGatewayClientImpl(String gatewayConfigurationEndpoint, String gatewayApiKey, String gatewayProxy, int maxBinarySize) {
+        this.gatewayConfigurationEndpoint = gatewayConfigurationEndpoint;
+        this.gatewayApiKey = gatewayApiKey;
         this.gatewayProxy = gatewayProxy;
         this.maxBinarySize = maxBinarySize;
     }
@@ -82,12 +89,15 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
                 (ConnectorInfoManagerFactoryImpl) ConnectorInfoManagerFactory.getInstance();
         factory.getLocalManager(getBundleURLs(), getBundleParentClassLoader());
 
-        connect();
+        List<String> endpoint = resolveEndpoint();
+        for (String s : endpoint) {
+            connect(s);
+        }
 
         reconnectPublisher = new SubmissionPublisher<>();
 
         // Start subscriber for handling reconnect
-        reconnectPublisher.subscribe(new Flow.Subscriber<Boolean>() {
+        reconnectPublisher.subscribe(new Flow.Subscriber<>() {
             private Flow.Subscription subscription;
 
             @Override
@@ -97,8 +107,8 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
             }
 
             @Override
-            public void onNext(Boolean message) {
-                CompletableFuture<Session> future = connect();
+            public void onNext(String endpoint) {
+                CompletableFuture<Session> future = connect(endpoint);
                 try {
                     future.get(10, TimeUnit.SECONDS);
 
@@ -138,7 +148,33 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
         LOG.info("Connector Server started at {0}", calendar.getTime());
     }
 
-    public CompletableFuture<Session> connect() {
+    public List<String> resolveEndpoint() {
+        HttpClient httpClient = new HttpClient();
+        setupProxy(httpClient);
+
+        try {
+            httpClient.start();
+
+            ContentResponse res = httpClient.GET(gatewayConfigurationEndpoint);
+            if (res.getStatus() != 200) {
+                throw new IllegalStateException("Cannot connect to the configuration endpoint: " + gatewayConfigurationEndpoint);
+            }
+            Gson gson = new Gson();
+            Map<String, List<String>> map = gson.fromJson(res.getContentAsString(), new TypeToken<Map<String, List<String>>>() {
+            });
+            return map.get("endpoint");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            try {
+                httpClient.stop();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    public CompletableFuture<Session> connect(String endpoint) {
         HttpClient httpClient = new HttpClient();
         setupProxy(httpClient);
 
@@ -150,10 +186,10 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
             // The client-side WebSocket EndPoint that
             // receives WebSocket messages from the server.
-            WebSocketClientListener clientEndPoint = new WebSocketClientListener(this);
+            WebSocketClientListener clientEndPoint = new WebSocketClientListener(this, endpoint);
 
             // The server URI to connect to.
-            URI serverURI = URI.create(gatewayURL);
+            URI serverURI = URI.create(endpoint + "?token=" + gatewayApiKey);
 
             // Connect the client EndPoint to the server.
             CompletableFuture<Session> clientSessionPromise = webSocketClient.connect(clientEndPoint, serverURI);
@@ -210,8 +246,8 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
         httpClient.getProxyConfiguration().addProxy(proxy);
     }
 
-    public void reconnect() {
-        reconnectPublisher.submit(true);
+    public void reconnect(String endpoint) {
+        reconnectPublisher.submit(endpoint);
     }
 
     @Override

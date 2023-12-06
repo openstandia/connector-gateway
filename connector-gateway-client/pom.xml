@@ -23,6 +23,11 @@
             <artifactId>websocket-jetty-client</artifactId>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <scope>compile</scope>
+        </dependency>
 
         <dependency>
             <groupId>net.tirasa.connid</groupId>

@@ -14,7 +14,7 @@
     <name>Connector Gateway Zip</name>
     <groupId>jp.openstandia.connector</groupId>
     <artifactId>connector-gateway-zip</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.3-SNAPSHOT</version>
 
     <dependencies>
         <dependency>

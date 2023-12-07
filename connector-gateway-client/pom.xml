@@ -7,14 +7,14 @@
     <parent>
         <groupId>jp.openstandia.connector</groupId>
         <artifactId>connector-gateway</artifactId>
-        <version>0.0.2-SNAPSHOT</version>
+        <version>0.0.3-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <name>Connector Gateway Client</name>
     <groupId>jp.openstandia.connector</groupId>
     <artifactId>connector-gateway-client</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.3-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <dependencies>

@@ -154,11 +154,25 @@ public class Main {
                     }
                 }
 
-                return new WebSocketServerListener();
+                List<String> clientId = req.getParameterMap().get("client_id");
+                if (clientId == null || clientId.isEmpty()) {
+                    try {
+                        resp.sendError(HttpStatus.UNAUTHORIZED_401, "Missing client ID");
+                    } catch (IOException e) {
+                        LOG.warn("Failed to send error", e);
+                    }
+                    return null;
+                }
+
+                return new WebSocketServerListener(clientId.get(0));
             });
         });
 
         server.start();
+    }
+
+    private boolean equals(List<String> params, String value) {
+        return params != null && !params.isEmpty() && params.get(0).equals(value);
     }
 
     protected String resolveContextPath() {

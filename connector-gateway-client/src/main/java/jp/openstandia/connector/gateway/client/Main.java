@@ -29,7 +29,11 @@ import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Properties;
 import java.util.logging.LogManager;
@@ -137,6 +141,7 @@ public final class Main {
         String loggerClass = properties.getProperty(PROP_LOGGER_CLASS);
         String gatewayUrl = properties.getProperty(PROP_GATEWAY_URL);
         String gatewayApiKey = properties.getProperty(PROP_GATEWAY_API_KEY);
+        String gatewayClientId = toClientId(keyHash);
         String gatewayProxy = properties.getProperty(PROP_GATEWAY_PROXY);
 
         if (portStr == null) {
@@ -171,7 +176,7 @@ public final class Main {
             Thread.currentThread().setContextClassLoader(Main.class.getClassLoader());
         }
 
-        connectorServer = new ConnectorGatewayClientImpl(gatewayUrl, gatewayApiKey, gatewayProxy, 8 * 1024);
+        connectorServer = new ConnectorGatewayClientImpl(gatewayUrl, gatewayApiKey, gatewayClientId, gatewayProxy, 8 * 1024);
         connectorServer.setPort(port);
         connectorServer.setBundleURLs(buildBundleURLs(new File(bundleDirStr)));
         if (libDirStr != null) {
@@ -190,6 +195,18 @@ public final class Main {
         connectorServer.start();
         getLog().info("Connector server listening on port " + port);
         connectorServer.awaitStop();
+    }
+
+    private static String toClientId(String keyHash) {
+        try {
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            byte[] sha256Byte = sha256.digest(keyHash.getBytes(StandardCharsets.UTF_8));
+            HexFormat hex = HexFormat.of().withLowerCase();
+            String hexString = hex.formatHex(sha256Byte);
+            return hexString;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     public static void stop(String[] args) {

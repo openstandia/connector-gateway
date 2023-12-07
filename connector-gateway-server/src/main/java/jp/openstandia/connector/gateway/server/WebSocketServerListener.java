@@ -16,32 +16,54 @@
 package jp.openstandia.connector.gateway.server;
 
 import org.eclipse.jetty.websocket.api.*;
+import org.identityconnectors.common.security.GuardedString;
+import org.identityconnectors.common.security.SecurityUtil;
+import org.identityconnectors.framework.common.serializer.BinaryObjectDeserializer;
+import org.identityconnectors.framework.common.serializer.ObjectSerializerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 public class WebSocketServerListener implements WebSocketListener, WebSocketPingPongListener {
 
     private static final Logger LOG = LoggerFactory.getLogger(WebSocketServerListener.class);
+    private static final Object LOCK = new Object();
 
     private static final byte OP_START = 1;
     private static final byte OP_BODY = 2;
     private static final byte OP_END = 3;
 
-    private static final Map<Session, WebSocketServerListener> sessions = new ConcurrentHashMap<>();
+    private static final Map<String, List<WebSocketServerListener>> allSessions = new ConcurrentHashMap<>();
     private static final Map<Integer, Channel> channels = new ConcurrentHashMap<>();
 
-    private Session session;
+    private final String clientId;
+    private Session clientSession;
+
+    public WebSocketServerListener(String clientId) {
+        this.clientId = clientId;
+        synchronized (LOCK) {
+            List<WebSocketServerListener> clientSessions = allSessions.get(clientId);
+            if (clientSessions == null) {
+                List<WebSocketServerListener> arrayList = new ArrayList<>();
+                arrayList.add(this);
+                allSessions.put(clientId, arrayList);
+            }
+        }
+    }
 
     public static int generateId() {
         while (true) {
@@ -63,11 +85,59 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
         byte[] payload;
     }
 
+    private static String toClientId(GuardedString guardedString) {
+        AtomicReference<String> clientId = new AtomicReference<>();
+        guardedString.access((c) -> {
+            try {
+                byte[] bytes = SecurityUtil.charsToBytes(c);
+                String hash = SecurityUtil.computeBase64SHA1Hash(bytes);
+
+                MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+                byte[] sha256Byte = sha256.digest(hash.getBytes(StandardCharsets.UTF_8));
+                HexFormat hex = HexFormat.of().withLowerCase();
+                clientId.set(hex.formatHex(sha256Byte));
+                return;
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        return clientId.get();
+    }
+
     public static boolean connect(Socket tcpSocket, int maxBinarySize) {
-        List<CompletableFuture<Channel>> futures = sessions.entrySet().stream()
-                .filter(entry -> entry.getKey().isOpen())
+        // Handle clientId for routing to the client
+        final String clientId;
+        final InputStream in;
+        try {
+            // TODO Handle big size key
+            in = new BufferedInputStream(tcpSocket.getInputStream(), 8192);
+            in.mark(0);
+
+            ObjectSerializerFactory factory = ObjectSerializerFactory.getInstance();
+            BinaryObjectDeserializer decoder = factory.newBinaryDeserializer(in);
+            Locale locale = (Locale) decoder.readObject();
+            GuardedString key = (GuardedString) decoder.readObject();
+            clientId = toClientId(key);
+
+            // Reset to the top position for reading later
+            in.reset();
+        } catch (IOException e) {
+            LOG.error("Failed to handle TCP connect request. socket={}", tcpSocket, e);
+            close(tcpSocket);
+            return false;
+        }
+
+        List<WebSocketServerListener> currentClientSessions = allSessions.get(clientId);
+        if (currentClientSessions == null) {
+            LOG.warn("Not found client session(s). socket={}, clientId: {}", tcpSocket, clientId);
+            close(tcpSocket);
+            return false;
+        }
+
+        List<CompletableFuture<Channel>> futures = currentClientSessions.stream()
+                .filter(entry -> entry.clientSession != null && entry.clientSession.isOpen())
                 .map(entry -> {
-                    Session session = entry.getKey();
+                    Session session = entry.clientSession;
 
                     int id = generateId();
                     CompletableFuture<Channel> start = new CompletableFuture<>();
@@ -99,7 +169,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                                     out.write(message.payload);
                                     out.flush();
                                 } catch (IOException e) {
-                                    LOG.error("Failed to write response to the TCP client. socket={}, session={}, id={}", tcpSocket, session, id);
+                                    LOG.error("Failed to write response to the TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
                                     subscription.cancel();
                                     close();
                                     return;
@@ -129,7 +199,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                             try {
                                 tcpSocket.close();
                             } catch (IOException e) {
-                                LOG.warn("Failed to close TCP connection. socket={}, session={}, id={}", tcpSocket, session, id);
+                                LOG.warn("Failed to close TCP connection. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
                             }
                         }
                     });
@@ -148,15 +218,15 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                 })
                 .collect(Collectors.toList());
 
-        CompletableFuture<Channel>[] completableFutures = futures.toArray(new CompletableFuture[0]);
-        CompletableFuture<Object> objectCompletableFuture = CompletableFuture.anyOf(completableFutures);
+        final CompletableFuture<Channel>[] completableFutures = futures.toArray(new CompletableFuture[0]);
+        final CompletableFuture<Object> objectCompletableFuture = CompletableFuture.anyOf(completableFutures);
 
         // TODO configurable timeout
-        Channel channel = null;
+        final Channel channel;
         try {
             channel = (Channel) objectCompletableFuture.get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
-            LOG.error("Failed to start channel. socket={}", tcpSocket, e);
+            LOG.error("Failed to start channel. socket={}, clientId={}", tcpSocket, clientId, e);
             close(tcpSocket);
             return false;
         }
@@ -166,7 +236,6 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
         SubmissionPublisher publisher = channel.publisher;
 
         try {
-            InputStream in = tcpSocket.getInputStream();
             RemoteEndpoint wsRemote = session.getRemote();
 
             byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
@@ -184,11 +253,11 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                     wsRemote.flush();
 
                 } else if (count == -1) {
-                    LOG.info("Detected TCP client is closed. socket={}, id={}", tcpSocket, id);
+                    LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
                     break;
 
                 } else {
-                    LOG.info("Waiting request from TCP client. socket={}, id={}", tcpSocket, id);
+                    LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
                 }
             }
             publisher.close();
@@ -197,7 +266,8 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             return true;
 
         } catch (Exception e) {
-            LOG.error("Failed to connect to the gateway client. id={}", id, e);
+            LOG.error("Failed to connect to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
+            close(tcpSocket);
             return false;
         }
     }
@@ -226,21 +296,22 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketConnect(Session session) {
-        LOG.info("Connected the Gateway Client. session={}", session);
+        LOG.info("Connected the Gateway Client. clientId={}, session={}", clientId, session);
 
-        this.session = session;
-        sessions.put(session, this);
+        this.clientSession = session;
     }
 
     @Override
     public void onWebSocketClose(int statusCode, String reason) {
-        LOG.info("Closed the Gateway Client. session={}, statusCode={}, reason={}", session, statusCode, reason);
+        LOG.info("Closed the Gateway Client. clientId={}, session={}, statusCode={}, reason={}", clientId, clientSession, statusCode, reason);
 
-        sessions.remove(session);
-    }
-
-    public Session getSession() {
-        return session;
+        synchronized (LOCK) {
+            List<WebSocketServerListener> clientSessions = allSessions.get(clientId);
+            if (clientSessions.size() == 1 && clientSessions.contains(this)) {
+                allSessions.remove(clientId);
+            }
+            this.clientSession = null;
+        }
     }
 
     @Override
@@ -251,7 +322,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             int id = payload.getInt();
             Channel channel = channels.get(id);
             if (channel == null) {
-                LOG.error("Cannot establish channel on the session. session={}, id={}", session, id);
+                LOG.error("Cannot establish channel on the session. clientId={}, session={}, id={}", clientId, clientSession, id);
                 return;
             }
             Message message = new Message();
@@ -287,6 +358,6 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketPing(ByteBuffer payload) {
-        LOG.debug("onPing");
+        LOG.debug("onPing. clientId={}, session={}", clientId, clientSession);
     }
 }

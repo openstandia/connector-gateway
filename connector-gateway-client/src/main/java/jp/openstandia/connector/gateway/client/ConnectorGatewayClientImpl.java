@@ -41,6 +41,7 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
     private final String gatewayConfigurationEndpoint;
     private final String gatewayApiKey;
+    private final String gatewayClientId;
     private final String gatewayProxy;
     private final int maxBinarySize;
 
@@ -50,9 +51,10 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
     private SubmissionPublisher<String> reconnectPublisher;
 
-    public ConnectorGatewayClientImpl(String gatewayConfigurationEndpoint, String gatewayApiKey, String gatewayProxy, int maxBinarySize) {
+    public ConnectorGatewayClientImpl(String gatewayConfigurationEndpoint, String gatewayApiKey, String gatewayClientId, String gatewayProxy, int maxBinarySize) {
         this.gatewayConfigurationEndpoint = gatewayConfigurationEndpoint;
         this.gatewayApiKey = gatewayApiKey;
+        this.gatewayClientId = gatewayClientId;
         this.gatewayProxy = gatewayProxy;
         this.maxBinarySize = maxBinarySize;
     }
@@ -189,7 +191,7 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
             WebSocketClientListener clientEndPoint = new WebSocketClientListener(this, endpoint);
 
             // The server URI to connect to.
-            URI serverURI = URI.create(endpoint + "?token=" + gatewayApiKey);
+            URI serverURI = URI.create(endpoint + "?token=" + gatewayApiKey + "&client_id=" + gatewayClientId);
 
             // Connect the client EndPoint to the server.
             CompletableFuture<Session> clientSessionPromise = webSocketClient.connect(clientEndPoint, serverURI);

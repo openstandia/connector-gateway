@@ -15,25 +15,29 @@
  */
 package jp.openstandia.connector.gateway.server;
 
+import com.google.gson.Gson;
+import jakarta.servlet.*;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ServerSocketFactory;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Calendar;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.stream.Collectors;
 
 public class Main {
     private static final Logger LOG = LoggerFactory.getLogger(Main.class);
@@ -53,6 +57,7 @@ public class Main {
     private int wsServerPort;
     private String wsBindAddress = null;
     private int wsMaxConnections = 10;
+    private int wsMaxBinarySize = 8 * 1024;
     private Server server;
     private ServerConnector connector;
 
@@ -100,6 +105,10 @@ public class Main {
         return wsMaxConnections;
     }
 
+    public int getWsMaxBinarySize() {
+        return wsMaxBinarySize;
+    }
+
     public Long getStartTime() {
         return startDate;
     }
@@ -121,13 +130,14 @@ public class Main {
 
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
         context.setContextPath("/");
+        context.addServlet(new ServletHolder(new ConfigurationServlet(this)), "/configuration");
         server.setHandler(context);
 
         final String contextPath = resolveContextPath();
         final String apiKey = resolveAPIKey();
 
         JettyWebSocketServletContainerInitializer.configure(context, (servletContext, container) -> {
-            container.setMaxBinaryMessageSize(65535);
+            container.setMaxBinaryMessageSize(getWsMaxBinarySize());
             container.addMapping(contextPath, (req, resp) -> {
                 // authentication by API key if configured
                 // TODO support more authentication method
@@ -173,6 +183,22 @@ public class Main {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read API key file", e);
         }
+    }
+
+    protected int resolvePort(int defaultPort) {
+        String port = System.getenv("PORT");
+        if (port == null || port.isBlank()) {
+            return defaultPort;
+        }
+        return Integer.parseInt(port);
+    }
+
+    protected List<String> resolveEndpoint() {
+        String endpoint = System.getenv("ENDPOINT");
+        if (endpoint == null || endpoint.isBlank()) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(endpoint.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
     public void startTcpServer() {
@@ -250,10 +276,76 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         Main server = new Main();
-        server.setTcpServerPort(8759); // TODO configurable
-        server.setWsServerPort(8080);  // TODO configurable
+        server.setTcpServerPort(server.resolveTcpPort(8759));
+        server.setWsServerPort(server.resolveHttpPort(8080));
         server.startTcpServer();
         server.startWsServer();
         server.join();
+    }
+
+    private int resolveTcpPort(int defaultPort) {
+        String port = System.getenv("TCP_PORT");
+        return parseInt(port, defaultPort);
+    }
+
+    private int resolveHttpPort(int defaultPort) {
+        String port = System.getenv("HTTP_PORT");
+        return parseInt(port, defaultPort);
+    }
+
+    private int parseInt(String s, int defaultValue) {
+        if (s == null || s.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            LOG.warn("Invalid number. Use default value. number: {}, default: {}", s, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    public static class ConfigurationServlet implements Servlet {
+
+        private final Main main;
+
+        public ConfigurationServlet(Main main) {
+            this.main = main;
+        }
+
+        @Override
+        public void init(ServletConfig servletConfig) throws ServletException {
+
+        }
+
+        @Override
+        public ServletConfig getServletConfig() {
+            return null;
+        }
+
+        @Override
+        public void service(ServletRequest req, ServletResponse res) throws ServletException, IOException {
+            Map<String, List<String>> configuration = new HashMap<>();
+            configuration.put("endpoint", main.resolveEndpoint());
+
+            Gson gson = new Gson();
+            String json = gson.toJson(configuration);
+
+            res.setContentType("application/json;charset=UTF-8");
+            PrintWriter writer = res.getWriter();
+            writer.write(json);
+            writer.flush();
+            writer.close();
+        }
+
+        @Override
+        public String getServletInfo() {
+            return null;
+        }
+
+        @Override
+        public void destroy() {
+
+        }
     }
 }

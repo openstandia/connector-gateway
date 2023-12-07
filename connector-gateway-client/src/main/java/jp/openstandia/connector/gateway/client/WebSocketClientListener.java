@@ -45,6 +45,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     private final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
     private final ConnectorGatewayClientImpl server;
+    private final String endpoint;
 
     private Session session;
     private ScheduledFuture<?> keepAlive;
@@ -52,8 +53,9 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     Map<Integer, PipedOutputStream> channels = new HashMap<>();
 
-    public WebSocketClientListener(ConnectorGatewayClientImpl server) {
+    public WebSocketClientListener(ConnectorGatewayClientImpl server, String endpoint) {
         this.server = server;
+        this.endpoint = endpoint;
 
         threadPool =
                 new ThreadPoolExecutor(server.getMinWorkers(), server.getMaxWorkers(), 30,
@@ -94,7 +96,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketError(Throwable cause) {
-        server.reconnect();
+        server.reconnect(endpoint);
     }
 
     @Override
@@ -165,7 +167,18 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
                         @Override
                         public void write(byte[] b, int off, int len) throws IOException {
-                            ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + (len - off))
+                            int bytesLen = len;
+                            int bytesOffset = off;
+                            while (bytesLen > 0) {
+                                final int chunkSize = Math.min(bytesLen, server.getMaxBinarySize() - Byte.BYTES - Integer.BYTES);
+                                writeInternal(b, bytesOffset, chunkSize);
+                                bytesLen -= chunkSize;
+                                bytesOffset += chunkSize;
+                            }
+                        }
+
+                        private void writeInternal(byte[] b, int off, int len) throws IOException {
+                            ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + len)
                                     .put(OP_BODY)
                                     .putInt(id)
                                     .put(b, off, len)
@@ -189,7 +202,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
             pout.flush();
 
         } catch (IOException e) {
-            e.printStackTrace();
+            LOG.error(e, "Failed to handle body message from server");
         }
     }
 

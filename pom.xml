@@ -44,7 +44,7 @@
             Use evolveum release version
             https://github.com/Evolveum/ConnId/tags
         -->
-        <connector.version>1.5.1.10</connector.version>
+        <connector.version>1.5.2.0</connector.version>
         <slf4j.version>1.7.36</slf4j.version>
         <junit.version>5.9.1</junit.version>
         <jakarta.websocket.api.version>2.0.0</jakarta.websocket.api.version>

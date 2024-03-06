@@ -1,6 +1,7 @@
 import com.evolveum.polygon.connector.csv.CsvConfiguration;
 import com.evolveum.polygon.connector.csv.CsvConnector;
 import org.identityconnectors.common.security.GuardedString;
+import org.identityconnectors.common.security.SecurityUtil;
 import org.identityconnectors.framework.api.*;
 import org.identityconnectors.framework.common.objects.ConnectorObject;
 import org.identityconnectors.framework.common.objects.ObjectClass;
@@ -24,10 +25,10 @@ public class TestClient {
 
     protected CsvConfiguration newConfiguration() {
         CsvConfiguration conf = new CsvConfiguration();
-        conf.setFilePath(new File("./users.csv"));
+        conf.setFilePath(new File("./users2.csv"));
         conf.setFieldDelimiter(",");
         conf.setUniqueAttribute("id");
-        conf.setNameAttribute("name");
+//        conf.setNameAttribute("name");
         return conf;
     }
 
@@ -38,8 +39,11 @@ public class TestClient {
     }
 
     protected ConnectorFacade newFacade(CsvConfiguration conf) {
+        int port = 8759;
+//        port = 8769;
+
         ConnectorInfoManagerFactory connectorInfoManagerFactory = ConnectorInfoManagerFactory.getInstance();
-        ConnectorInfoManager remoteInfoManager = connectorInfoManagerFactory.getRemoteManager(newRemoteFrameworkConnectionInfo("localhost", 8759));
+        ConnectorInfoManager remoteInfoManager = connectorInfoManagerFactory.getRemoteManager(newRemoteFrameworkConnectionInfo("localhost", port));
         List<ConnectorInfo> connectorInfos = remoteInfoManager.getConnectorInfos();
         for (ConnectorInfo connectorInfo : connectorInfos) {
             System.out.println(connectorInfo);
@@ -49,7 +53,7 @@ public class TestClient {
         APIConfiguration impl = TestHelpers.createTestConfiguration(CsvConnector.class, conf);
         LocalConnectorInfoImpl info = (LocalConnectorInfoImpl) ((APIConfigurationImpl) impl).getConnectorInfo();
         RemoteConnectorInfoImpl remoteInfo = info.toRemote();
-        RemoteFrameworkConnectionInfo connInfo = new RemoteFrameworkConnectionInfo("localhost", 8759, new GuardedString("changeit".toCharArray()));
+        RemoteFrameworkConnectionInfo connInfo = new RemoteFrameworkConnectionInfo("localhost", port, new GuardedString("changeit".toCharArray()));
         remoteInfo.setRemoteConnectionInfo(connInfo);
         ConnectorKey connectorKey = new ConnectorKey("com.evolveum.polygon.connector-csv", "2.4", "com.evolveum.polygon.connector.csv.CsvConnector");
         remoteInfo.setConnectorKey(connectorKey);

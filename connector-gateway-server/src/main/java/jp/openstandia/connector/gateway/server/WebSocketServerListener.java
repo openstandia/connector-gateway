@@ -47,7 +47,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
     private static final byte OP_BODY = 2;
     private static final byte OP_END = 3;
 
-    private static final Map<String, List<WebSocketServerListener>> allSessions = new ConcurrentHashMap<>();
+    private static final Map<String, Set<WebSocketServerListener>> allSessions = new ConcurrentHashMap<>();
     private static final Map<Integer, Channel> channels = new ConcurrentHashMap<>();
 
     private final String clientId;
@@ -56,12 +56,8 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
     public WebSocketServerListener(String clientId) {
         this.clientId = clientId;
         synchronized (LOCK) {
-            List<WebSocketServerListener> clientSessions = allSessions.get(clientId);
-            if (clientSessions == null) {
-                List<WebSocketServerListener> arrayList = new ArrayList<>();
-                arrayList.add(this);
-                allSessions.put(clientId, arrayList);
-            }
+            Set<WebSocketServerListener> clientSessions = allSessions.computeIfAbsent(clientId, k -> new LinkedHashSet<>());
+            clientSessions.add(this);
         }
     }
 
@@ -127,7 +123,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             return false;
         }
 
-        List<WebSocketServerListener> currentClientSessions = allSessions.get(clientId);
+        Set<WebSocketServerListener> currentClientSessions = allSessions.get(clientId);
         if (currentClientSessions == null) {
             LOG.warn("Not found client session(s). socket={}, clientId: {}", tcpSocket, clientId);
             close(tcpSocket);
@@ -303,12 +299,13 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketClose(int statusCode, String reason) {
-        LOG.info("Closed the Gateway Client. clientId={}, session={}, statusCode={}, reason={}", clientId, clientSession, statusCode, reason);
+        LOG.info("Closed the Gateway Client. clientId={}, session={}, statusCode={}, reason={}, isOpen={}",
+                clientId, clientSession, statusCode, reason, clientSession.isOpen());
 
         synchronized (LOCK) {
-            List<WebSocketServerListener> clientSessions = allSessions.get(clientId);
-            if (clientSessions.size() == 1 && clientSessions.contains(this)) {
-                allSessions.remove(clientId);
+            Set<WebSocketServerListener> clientSessions = allSessions.get(clientId);
+            if (clientSessions != null) {
+                clientSessions.remove(this);
             }
             this.clientSession = null;
         }

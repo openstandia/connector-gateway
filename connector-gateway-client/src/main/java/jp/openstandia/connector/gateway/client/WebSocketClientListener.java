@@ -46,10 +46,10 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
     private final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
     private final ConnectorGatewayClientImpl server;
     private final String endpoint;
-
+    private final ThreadPoolExecutor threadPool;
     private Session session;
     private ScheduledFuture<?> keepAlive;
-    private ThreadPoolExecutor threadPool;
+    private boolean isClosed = false;
 
     Map<Integer, PipedOutputStream> channels = new HashMap<>();
 
@@ -76,12 +76,12 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
             session.getRemote().sendPing(buffer, new WriteCallback() {
                 @Override
                 public void writeSuccess() {
-                    LOG.ok("Keep-alive: sending is OK. session={0}", session);
+                    LOG.ok("Keep-alive: sending is OK. endpoint={0}, session={1}", endpoint, session);
                 }
 
                 @Override
                 public void writeFailed(Throwable x) {
-                    LOG.error("Keep-alive: sending is NG. session={0}", session);
+                    LOG.error("Keep-alive: sending is NG. endpoint={0}, session={1}", endpoint, session);
                 }
             });
         }, 0, 10, TimeUnit.SECONDS);
@@ -89,14 +89,25 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketClose(int statusCode, String reason) {
-        keepAlive.cancel(true);
-        channels.clear();
-        executorService.shutdown();
+        LOG.warn("Detected websocket closed. endpoint={0}, statusCode={1}, reason={2}, session={3}", endpoint, statusCode, reason, session);
+        close();
     }
 
     @Override
     public void onWebSocketError(Throwable cause) {
-        server.reconnect(endpoint);
+        LOG.error(cause, "Detected websocket error. endpoint={0}, message={1}, session={2}", endpoint, cause.getMessage(), session);
+        close();
+    }
+
+    private void close() {
+        if (isClosed) {
+            return;
+        }
+        isClosed = true;
+
+        keepAlive.cancel(true);
+        channels.clear();
+        executorService.shutdown();
     }
 
     @Override
@@ -106,7 +117,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
         byte op = channelMessage.get();
 
         if (op != OP_BODY) {
-            LOG.warn("Detected invalid operation code for binary message from the Gateway Server. op={0}, session={1}", op, session);
+            LOG.warn("Detected invalid operation code for binary message from the Gateway Server. endpoint={0}, op={1}, session={2}", endpoint, op, session);
             return;
         }
 
@@ -122,7 +133,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
                 pout.write(dst);
                 pout.flush();
             } catch (IOException e) {
-                LOG.warn(e, "Failed to write");
+                LOG.warn(e, "Failed to write. endpoint={0}", endpoint);
             }
             return;
         }
@@ -202,7 +213,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
             pout.flush();
 
         } catch (IOException e) {
-            LOG.error(e, "Failed to handle body message from server");
+            LOG.error(e, "Failed to handle body message from server. endpoint={0}", endpoint);
         }
     }
 
@@ -211,7 +222,7 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
         if (pout != null) {
             try {
                 pout.close();
-            } catch (IOException e) {
+            } catch (IOException ignore) {
             }
         }
     }
@@ -235,11 +246,11 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
             int id = payload.getInt();
 
             if (op == OP_START) {
-                LOG.info("Starting the channel. session={0}, id={0}", session, id);
+                LOG.info("Starting the channel. endpoint={0}, session={1}, id={2}", endpoint, session, id);
 
                 // Verify the channel
                 if (channels.containsKey(id)) {
-                    LOG.warn("Detected existing channel id with start operation. id={0}", id);
+                    LOG.warn("Detected existing channel id with start operation. endpoint={0}, id={1}", endpoint, id);
                     return;
                 }
                 ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES)
@@ -248,16 +259,16 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
                         .flip();
                 session.getRemote().sendPong(buffer);
 
-                LOG.info("Finished replay to the Gateway Server for the start operation. session={0}, id={0}", session, id);
+                LOG.info("Finished replay to the Gateway Server for the start operation. endpoint={0}, session={1}, id={2}", session, id);
 
             } else if (op == OP_END) {
-                LOG.info("Closing the channel. session={0}, id={0}", session, id);
+                LOG.info("Closing the channel. endpoint={0}, session={1}, id={2}", session, id);
 
                 // Close the channel if exists
                 closeChannel(id);
             }
         } catch (IOException e) {
-            LOG.error("IO error", e);
+            LOG.error(e, "IO error. endpoint={0}", endpoint);
         }
     }
 }

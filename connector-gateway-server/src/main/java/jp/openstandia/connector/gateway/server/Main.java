@@ -244,7 +244,7 @@ public class Main {
         try {
             server.stop();
         } catch (Exception e) {
-            e.printStackTrace();
+            LOG.warn("Exception while stopping server", e);
         }
     }
 

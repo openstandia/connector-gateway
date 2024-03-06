@@ -22,7 +22,6 @@ import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.util.BasicAuthentication;
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.exceptions.UpgradeException;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.api.ConnectorFacadeFactory;
@@ -33,9 +32,12 @@ import org.identityconnectors.framework.server.ConnectorServer;
 
 import java.net.URI;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+
+import static java.util.stream.Collectors.toList;
 
 public class ConnectorGatewayClientImpl extends ConnectorServer {
 
@@ -48,8 +50,8 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
     private CountDownLatch stopLatch;
     private Long startDate = null;
     private static final Log LOG = Log.getLog(ConnectorGatewayClientImpl.class);
-
-    private SubmissionPublisher<String> reconnectPublisher;
+    private final ScheduledExecutorService reconnectExecutorService = Executors.newScheduledThreadPool(1);
+    private final Map<String, Session> connections = new ConcurrentHashMap<>();
 
     public ConnectorGatewayClientImpl(String gatewayConfigurationEndpoint, String gatewayApiKey, String gatewayClientId, String gatewayProxy, int maxBinarySize) {
         this.gatewayConfigurationEndpoint = gatewayConfigurationEndpoint;
@@ -91,56 +93,34 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
                 (ConnectorInfoManagerFactoryImpl) ConnectorInfoManagerFactory.getInstance();
         factory.getLocalManager(getBundleURLs(), getBundleParentClassLoader());
 
-        List<String> endpoint = resolveEndpoint();
-        for (String s : endpoint) {
-            connect(s);
-        }
+        // start connect scheduler
+        reconnectExecutorService.scheduleAtFixedRate(() -> {
+            resolveEndpoint()
+                    .stream()
+                    .filter(endpoint -> {
+                        Session s = connections.get(endpoint);
+                        return s == null || !s.isOpen();
+                    })
+                    .map(endpoint -> {
+                        return this.connect(endpoint)
+                                .thenAccept(s -> {
+                                    if (s.isOpen()) {
+                                        LOG.info("Connected to {0}", endpoint);
+                                        connections.put(endpoint, s);
+                                    }
+                                })
+                                .exceptionally(e -> {
+                                    LOG.warn("Cannot connect to {0}. message={1}", endpoint, e.getMessage());
+                                    return null;
+                                });
+                    })
+                    .map(CompletableFuture::join)
+                    .collect(toList());
 
-        reconnectPublisher = new SubmissionPublisher<>();
+            // clean closed session
+            connections.entrySet().removeIf(entry -> !entry.getValue().isOpen());
 
-        // Start subscriber for handling reconnect
-        reconnectPublisher.subscribe(new Flow.Subscriber<>() {
-            private Flow.Subscription subscription;
-
-            @Override
-            public void onSubscribe(Flow.Subscription subscription) {
-                this.subscription = subscription;
-                subscription.request(1);
-            }
-
-            @Override
-            public void onNext(String endpoint) {
-                CompletableFuture<Session> future = connect(endpoint);
-                try {
-                    future.get(10, TimeUnit.SECONDS);
-
-                } catch (ExecutionException | InterruptedException | TimeoutException e) {
-                    if (e instanceof ExecutionException) {
-                        if (((ExecutionException) e).getCause() instanceof UpgradeException) {
-                            int statusCode = ((UpgradeException) ((ExecutionException) e).getCause()).getResponseStatusCode();
-                            if (statusCode == 401) {
-                                LOG.error("The connector gateway server returned 401 error. Please check the authentication configuration.");
-                            }
-                        }
-                    }
-                    LOG.error(e, "Failed to connect. Waiting retry...");
-                    try {
-                        Thread.sleep(10000);
-                    } catch (InterruptedException ex) {
-                    }
-                }
-                subscription.request(1);
-            }
-
-            @Override
-            public void onError(Throwable throwable) {
-            }
-
-            @Override
-            public void onComplete() {
-            }
-        });
-
+        }, 0, 10, TimeUnit.SECONDS);
 
         stopLatch = new CountDownLatch(1);
         startDate = System.currentTimeMillis();
@@ -159,19 +139,20 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
 
             ContentResponse res = httpClient.GET(gatewayConfigurationEndpoint);
             if (res.getStatus() != 200) {
-                throw new IllegalStateException("Cannot connect to the configuration endpoint: " + gatewayConfigurationEndpoint);
+                throw new IllegalStateException("Error from the configuration endpoint. endpoint: "
+                        + gatewayConfigurationEndpoint + ", status: " + res.getStatus());
             }
             Gson gson = new Gson();
             Map<String, List<String>> map = gson.fromJson(res.getContentAsString(), new TypeToken<Map<String, List<String>>>() {
             });
             return map.get("endpoint");
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            LOG.warn(e, "Cannot resolve the configuration endpoint: {0}", gatewayConfigurationEndpoint);
+            return Collections.emptyList();
         } finally {
             try {
                 httpClient.stop();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            } catch (Exception ignore) {
             }
         }
     }
@@ -197,9 +178,8 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
             CompletableFuture<Session> clientSessionPromise = webSocketClient.connect(clientEndPoint, serverURI);
             return clientSessionPromise;
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
-        return null;
     }
 
     protected void setupProxy(HttpClient httpClient) {
@@ -246,10 +226,6 @@ public class ConnectorGatewayClientImpl extends ConnectorServer {
         }
 
         httpClient.getProxyConfiguration().addProxy(proxy);
-    }
-
-    public void reconnect(String endpoint) {
-        reconnectPublisher.submit(endpoint);
     }
 
     @Override

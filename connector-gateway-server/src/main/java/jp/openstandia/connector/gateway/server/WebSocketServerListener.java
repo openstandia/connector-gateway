@@ -262,7 +262,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             return true;
 
         } catch (Exception e) {
-            LOG.error("Failed to connect to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
+            LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
             close(tcpSocket);
             return false;
         }

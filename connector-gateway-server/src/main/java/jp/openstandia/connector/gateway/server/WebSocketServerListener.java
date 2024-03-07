@@ -33,9 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -162,49 +160,57 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
         final Channel channel;
         try {
             channel = (Channel) objectCompletableFuture.get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
             LOG.error("Failed to start channel. socket={}, clientId={}", tcpSocket, clientId, e);
             close(tcpSocket);
             return false;
         }
 
-        Session session = channel.session;
-        int id = channel.id;
+        final Session session = channel.session;
+        final int id = channel.id;
+
+        CompletableFuture<Void> transportFuture = CompletableFuture.runAsync(() -> {
+            try {
+                RemoteEndpoint wsRemote = session.getRemote();
+
+                byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
+                int count = 0;
+                while (true) {
+                    count = in.read(bytes);
+                    if (count > 0) {
+                        ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
+                                .put(OP_BODY)
+                                .putInt(id)
+                                .put(bytes, 0, count)
+                                .flip();
+
+                        wsRemote.sendBytes(buffer);
+                        wsRemote.flush();
+
+                    } else if (count == -1) {
+                        LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                        break;
+
+                    } else {
+                        LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
+            }
+        });
 
         try {
-            RemoteEndpoint wsRemote = session.getRemote();
-
-            byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
-            int count = 0;
-            while (true) {
-                count = in.read(bytes);
-                if (count > 0) {
-                    ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
-                            .put(OP_BODY)
-                            .putInt(id)
-                            .put(bytes, 0, count)
-                            .flip();
-
-                    wsRemote.sendBytes(buffer);
-                    wsRemote.flush();
-
-                } else if (count == -1) {
-                    LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                    break;
-
-                } else {
-                    LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                }
-            }
-//            publisher.close();
-            close(tcpSocket, session, id);
-
+            // TODO configurable idle timeout
+            transportFuture.get(60, TimeUnit.SECONDS);
             return true;
 
-        } catch (Exception e) {
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
             LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
-            close(tcpSocket);
             return false;
+
+        } finally {
+            close(tcpSocket, session, id);
         }
     }
 

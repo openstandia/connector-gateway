@@ -32,9 +32,11 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -49,6 +51,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
     private static final Map<String, Set<WebSocketServerListener>> allSessions = new ConcurrentHashMap<>();
     private static final Map<Integer, Channel> channels = new ConcurrentHashMap<>();
+    private static final AtomicInteger idGenerator = new AtomicInteger(0);
 
     private final String clientId;
     private Session clientSession;
@@ -62,23 +65,21 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
     }
 
     public static int generateId() {
-        while (true) {
-            int id = new SecureRandom().nextInt(Integer.MAX_VALUE);
-            if (!channels.containsKey(id)) {
-                return id;
-            }
-        }
+        return idGenerator.getAndIncrement();
     }
 
     private static class Channel {
-        int id;
-        Session session;
-        SubmissionPublisher<Message> publisher;
-    }
+        final int id;
+        final Session session;
+        final CompletableFuture<Channel> start;
+        final Socket tcpSocket;
 
-    private static class Message {
-        byte op;
-        byte[] payload;
+        Channel(int id, Session session, CompletableFuture<Channel> start, Socket tcpSocket) {
+            this.id = id;
+            this.session = session;
+            this.start = start;
+            this.tcpSocket = tcpSocket;
+        }
     }
 
     private static String toClientId(GuardedString guardedString) {
@@ -138,67 +139,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                     int id = generateId();
                     CompletableFuture<Channel> start = new CompletableFuture<>();
 
-                    SubmissionPublisher<Message> publisher = new SubmissionPublisher<>();
-                    Channel channel = new Channel();
-                    channel.id = id;
-                    channel.session = session;
-                    channel.publisher = publisher;
-
-                    // Start subscriber for handling response
-                    publisher.subscribe(new Flow.Subscriber<Message>() {
-                        private Flow.Subscription subscription;
-
-                        @Override
-                        public void onSubscribe(Flow.Subscription subscription) {
-                            this.subscription = subscription;
-                            subscription.request(1);
-                        }
-
-                        @Override
-                        public void onNext(Message message) {
-                            if (message.op == OP_START) {
-                                start.complete(channel);
-
-                            } else if (message.op == OP_BODY) {
-                                try {
-                                    OutputStream out = tcpSocket.getOutputStream();
-                                    out.write(message.payload);
-                                    out.flush();
-                                } catch (IOException e) {
-                                    LOG.error("Failed to write response to the TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                                    subscription.cancel();
-                                    close();
-                                    return;
-                                }
-                            }
-
-                            subscription.request(1);
-                        }
-
-                        @Override
-                        public void onError(Throwable throwable) {
-                        }
-
-                        @Override
-                        public void onComplete() {
-                        }
-
-                        public void close() {
-                            ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES + Byte.BYTES)
-                                    .put(OP_END)
-                                    .putInt(id)
-                                    .flip();
-
-                            RemoteEndpoint remote = session.getRemote();
-                            remote.sendPing(buffer, WriteCallback.NOOP);
-
-                            try {
-                                tcpSocket.close();
-                            } catch (IOException e) {
-                                LOG.warn("Failed to close TCP connection. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                            }
-                        }
-                    });
+                    Channel channel = new Channel(id, session, start, tcpSocket);
 
                     channels.put(id, channel);
 
@@ -229,7 +170,6 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
         Session session = channel.session;
         int id = channel.id;
-        SubmissionPublisher publisher = channel.publisher;
 
         try {
             RemoteEndpoint wsRemote = session.getRemote();
@@ -256,7 +196,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                     LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
                 }
             }
-            publisher.close();
+//            publisher.close();
             close(tcpSocket, session, id);
 
             return true;
@@ -283,6 +223,10 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
     }
 
     private static void close(Socket tcpSocket) {
+        if (tcpSocket.isClosed()) {
+            return;
+        }
+        LOG.info("Closing TCP connection. socket={}", tcpSocket);
         try {
             tcpSocket.close();
         } catch (IOException e) {
@@ -299,7 +243,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
     @Override
     public void onWebSocketClose(int statusCode, String reason) {
-        LOG.info("Closed the Gateway Client. clientId={}, session={}, statusCode={}, reason={}, isOpen={}",
+        LOG.info("Detected websocket closed. clientId={}, session={}, statusCode={}, reason={}, isOpen={}",
                 clientId, clientSession, statusCode, reason, clientSession.isOpen());
 
         synchronized (LOCK) {
@@ -307,8 +251,24 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
             if (clientSessions != null) {
                 clientSessions.remove(this);
             }
+
+            // close all TCP sockets for this websocket server listener since the client (IDM) is waiting the response
+            channels.entrySet().stream()
+                    .filter(entry -> entry.getValue().session.equals(this.clientSession))
+                    .forEach(entry -> {
+                        close(entry.getValue().tcpSocket);
+                    });
+
+            // clean
+            channels.entrySet().removeIf(entry -> !entry.getValue().session.equals(this.clientSession));
             this.clientSession = null;
         }
+    }
+
+    @Override
+    public void onWebSocketError(Throwable cause) {
+        LOG.warn("Detected websocket error. clientId={}, session={}, message={}, isOpen={}",
+                clientId, clientSession, cause.getMessage(), clientSession.isOpen());
     }
 
     @Override
@@ -322,11 +282,7 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
                 LOG.error("Cannot establish channel on the session. clientId={}, session={}, id={}", clientId, clientSession, id);
                 return;
             }
-            Message message = new Message();
-            message.op = op;
-            channel.publisher.submit(message);
-
-            return;
+            channel.start.complete(channel);
         }
     }
 
@@ -343,12 +299,18 @@ public class WebSocketServerListener implements WebSocketListener, WebSocketPing
 
             Channel channel = channels.get(id);
 
-            if (channel != null) {
-                Message message = new Message();
-                message.op = op;
-                message.payload = dst;
+            if (channel == null) {
+                LOG.error("Cannot continue using this channel on the session. clientId={}, session={}, id={}", clientId, clientSession, id);
+                return;
+            }
 
-                channel.publisher.submit(message);
+            try {
+                OutputStream out = channel.tcpSocket.getOutputStream();
+                out.write(dst);
+                out.flush();
+            } catch (IOException e) {
+                LOG.error("Failed to write response to the TCP client. socket={}, clientId={}, session={}, id={}", channel.tcpSocket, clientId, this.clientSession, id);
+                close(channel.tcpSocket, this.clientSession, id);
             }
         }
     }

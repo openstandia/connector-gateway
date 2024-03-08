@@ -164,7 +164,10 @@ public class Main {
                     return null;
                 }
 
-                return new WebSocketServerListener(clientId.get(0));
+                WebSocketServerListener webSocketServerListener = new WebSocketServerListener(clientId.get(0));
+                Relay.attach(webSocketServerListener);
+
+                return webSocketServerListener;
             });
         });
 

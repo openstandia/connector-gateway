@@ -158,43 +158,34 @@ public class Relay {
         final Session session = channel.client.clientSession;
         final int id = channel.id;
 
-        CompletableFuture<Void> transportFuture = CompletableFuture.runAsync(() -> {
-            try {
-                RemoteEndpoint wsRemote = session.getRemote();
-
-                byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
-                int count = 0;
-                while (true) {
-                    count = in.read(bytes);
-                    if (count > 0) {
-                        ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
-                                .put(OP_BODY)
-                                .putInt(id)
-                                .put(bytes, 0, count)
-                                .flip();
-
-                        wsRemote.sendBytes(buffer);
-                        wsRemote.flush();
-
-                    } else if (count == -1) {
-                        LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                        break;
-
-                    } else {
-                        LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
-            }
-        });
-
         try {
-            // TODO configurable idle timeout
-            transportFuture.get(60, TimeUnit.SECONDS);
+            RemoteEndpoint wsRemote = session.getRemote();
+
+            byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
+            int count = 0;
+            while (true) {
+                count = in.read(bytes);
+                if (count > 0) {
+                    ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
+                            .put(OP_BODY)
+                            .putInt(id)
+                            .put(bytes, 0, count)
+                            .flip();
+
+                    wsRemote.sendBytes(buffer);
+                    wsRemote.flush();
+
+                } else if (count == -1) {
+                    LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                    break;
+
+                } else {
+                    LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                }
+            }
             return true;
 
-        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+        } catch (IOException e) {
             LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
             return false;
 

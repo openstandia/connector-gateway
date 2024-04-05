@@ -111,6 +111,9 @@ public class TcpConnectionListener extends Thread {
 
                 while (true) {
                     try {
+                        // TODO Configurable
+                        connection.setSoTimeout(60000);
+
                         threadPool.execute(() -> {
                             if (!Relay.start(connection, connectorServer.getWsMaxBinarySize())) {
                                 try {

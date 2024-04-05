@@ -259,10 +259,10 @@ public class WebSocketClientListener implements WebSocketListener, WebSocketPing
                         .flip();
                 session.getRemote().sendPong(buffer);
 
-                LOG.info("Finished replay to the Gateway Server for the start operation. endpoint={0}, session={1}, id={2}", session, id);
+                LOG.info("Finished reply to the Gateway Server for the start operation. endpoint={0}, session={1}, id={2}", endpoint, session, id);
 
             } else if (op == OP_END) {
-                LOG.info("Closing the channel. endpoint={0}, session={1}, id={2}", session, id);
+                LOG.info("Closing the channel. endpoint={0}, session={1}, id={2}, size={3}", endpoint, session, id, channels.size());
 
                 // Close the channel if exists
                 closeChannel(id);

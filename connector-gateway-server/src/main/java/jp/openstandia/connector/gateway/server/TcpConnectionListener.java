@@ -112,7 +112,7 @@ public class TcpConnectionListener extends Thread {
                 while (true) {
                     try {
                         threadPool.execute(() -> {
-                            if (!WebSocketServerListener.connect(connection, connectorServer.getWsMaxBinarySize())) {
+                            if (!Relay.start(connection, connectorServer.getWsMaxBinarySize())) {
                                 try {
                                     connection.close();
                                 } catch (IOException e) {
@@ -136,7 +136,7 @@ public class TcpConnectionListener extends Thread {
                 // log the error unless it's because we've stopped
                 if (!isStopped() || !(e instanceof SocketException)) {
 
-                    LOG.error("Error processing request: {0}", e.getLocalizedMessage(), e);
+                    LOG.error("Error processing request: {}", e.getLocalizedMessage(), e);
                 }
                 // wait a second before trying again
                 if (!isStopped()) {

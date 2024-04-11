@@ -111,7 +111,12 @@ public class TcpConnectionListener extends Thread {
 
                 while (true) {
                     try {
-                        // Dispatch the relay process to the worker thread
+                        // Setting timeout causes TimeoutException while handling a lot of query results
+                        // because midPoint will not send the next request to the Remote Connector
+                        // until it has processed 200 results each, which may exceed the timeout period
+                        // if midPoint takes a long time to process.
+                        connection.setSoTimeout(0);
+
                         threadPool.execute(() -> {
                             if (!Relay.start(connection, connectorServer.getWsMaxBinarySize())) {
                                 try {

@@ -19,7 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.Socket;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
 
 public class Channel {
 
@@ -29,42 +29,15 @@ public class Channel {
     final WebSocketServerListener client;
     final CompletableFuture<Channel> start;
     final Socket tcpSocket;
-    final ScheduledExecutorService executor;
-    CompletableFuture<Void> transferFuture;
-    ScheduledFuture<?> scheduledFuture;
-    final long timeoutInSeconds = 60; // TODO Configurable
 
     public Channel(int id, WebSocketServerListener client, CompletableFuture<Channel> start, Socket tcpSocket) {
         this.id = id;
         this.client = client;
         this.start = start;
         this.tcpSocket = tcpSocket;
-        this.executor = Executors.newScheduledThreadPool(1);
     }
 
     public void start() {
         this.start.complete(this);
-    }
-
-    public CompletableFuture<Void> transfer(Runnable runnable) {
-        this.transferFuture = CompletableFuture.runAsync(runnable);
-        // Start initial transfer timeout thread
-        scheduleTransferTimeout();
-        return this.transferFuture;
-    }
-
-    public void scheduleTransferTimeout() {
-        if (scheduledFuture != null) {
-            scheduledFuture.cancel(false);
-        }
-        scheduledFuture = executor.schedule(() -> {
-            transferFuture.completeExceptionally(
-                    new TimeoutException(String.format("Data Transfer Timeout after %d seconds. clientId=%s, session=%s, id=%d",
-                            timeoutInSeconds, client.clientId, client.clientSession, id)));
-        }, timeoutInSeconds, TimeUnit.SECONDS);
-    }
-
-    public void close() {
-        this.executor.shutdown();
     }
 }

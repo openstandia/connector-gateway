@@ -145,7 +145,7 @@ public class Relay {
         final CompletableFuture<Channel>[] completableFutures = futures.toArray(new CompletableFuture[0]);
         final CompletableFuture<Object> objectCompletableFuture = CompletableFuture.anyOf(completableFutures);
 
-        // TODO configurable start timeout
+        // TODO configurable timeout
         final Channel channel;
         try {
             channel = (Channel) objectCompletableFuture.get(10, TimeUnit.SECONDS);
@@ -155,51 +155,37 @@ public class Relay {
             return false;
         }
 
-        // The channel is started
-
         final Session session = channel.client.clientSession;
         final int id = channel.id;
 
-        CompletableFuture<Void> transportFuture = channel.transfer(() -> {
-            try {
-                RemoteEndpoint wsRemote = session.getRemote();
-
-                byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
-                int count = 0;
-                while (true) {
-                    count = in.read(bytes);
-                    if (count > 0) {
-                        ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
-                                .put(OP_BODY)
-                                .putInt(id)
-                                .put(bytes, 0, count)
-                                .flip();
-
-                        wsRemote.sendBytes(buffer);
-                        wsRemote.flush();
-
-                    } else if (count == -1) {
-                        LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                        break;
-
-                    } else {
-                        LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
-            }
-        });
-
         try {
-            transportFuture.get();
+            RemoteEndpoint wsRemote = session.getRemote();
+
+            byte[] bytes = new byte[maxBinarySize - Byte.BYTES - Integer.BYTES];
+            int count = 0;
+            while (true) {
+                count = in.read(bytes);
+                if (count > 0) {
+                    ByteBuffer buffer = ByteBuffer.allocate(Byte.BYTES + Integer.BYTES + count)
+                            .put(OP_BODY)
+                            .putInt(id)
+                            .put(bytes, 0, count)
+                            .flip();
+
+                    wsRemote.sendBytes(buffer);
+                    wsRemote.flush();
+
+                } else if (count == -1) {
+                    LOG.info("Detected TCP client is closed. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                    break;
+
+                } else {
+                    LOG.info("Waiting request from TCP client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id);
+                }
+            }
             return true;
 
-        } catch (ExecutionException | InterruptedException e) {
-            if (e.getCause() instanceof TimeoutException) {
-                LOG.error("Detected transfer timeout. {}}", e.getMessage(), e);
-                return false;
-            }
+        } catch (IOException e) {
             LOG.error("Failed to send to the gateway client. socket={}, clientId={}, session={}, id={}", tcpSocket, clientId, session, id, e);
             return false;
 
@@ -254,9 +240,6 @@ public class Relay {
                 LOG.error("Cannot continue using this channel on the session. clientId={}, session={}, id={}", client.clientId, client.clientSession, id);
                 return;
             }
-
-            // Restart transfer timeout thread
-            channel.scheduleTransferTimeout();
 
             try {
                 OutputStream out = channel.tcpSocket.getOutputStream();

@@ -5,7 +5,7 @@
 
     <groupId>jp.openstandia.connector</groupId>
     <artifactId>connector-gateway</artifactId>
-    <version>0.0.6-SNAPSHOT</version>
+    <version>0.0.7-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Connector Gateway</name>
